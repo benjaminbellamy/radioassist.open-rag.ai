@@ -1,7 +1,7 @@
 # radioassist.open-rag.ai
 
-Demo front end for an OpenRAG instance (`demo.open-rag.ai`), designed to be
-embedded as a hosted URL inside the Radio Assist Windows application (WebView).
+Demo front end for an OpenRAG instance, designed to be embedded as a hosted
+URL inside the Radio Assist Windows application (WebView).
 
 - Streamed answers, simplified chat UX, no login.
 - Source documents (PDF / audio / video / image) with an inline player; audio
@@ -12,7 +12,7 @@ embedded as a hosted URL inside the Radio Assist Windows application (WebView).
 ## Architecture
 
 ```
-Browser (React SPA) ── /api ──► Node/Express proxy ──► demo.open-rag.ai/v1
+Browser (React SPA) ── /api ──► Node/Express proxy ──► OpenRAG /v1
                                  (holds OPENRAG_API_TOKEN, binds 127.0.0.1)
 ```
 
@@ -95,7 +95,7 @@ otherwise. The build needs the dev dependencies (Vite) — that's expected.
 
 ```bash
 sudo -u radioassist tee /opt/radioassist.open-rag.ai/.env >/dev/null <<'EOF'
-OPENRAG_API_URL=https://demo.open-rag.ai
+OPENRAG_API_URL=https://domain.tld
 OPENRAG_API_TOKEN=PASTE_YOUR_TOKEN_HERE
 PORT=8787
 HOST=127.0.0.1
@@ -226,7 +226,7 @@ Run `npm audit` periodically and keep Node/Caddy patched.
 
 | Variable             | Default                    | Description                                         |
 | -------------------- | -------------------------- | --------------------------------------------------- |
-| `OPENRAG_API_URL`    | `https://demo.open-rag.ai` | OpenRAG base URL                                    |
+| `OPENRAG_API_URL`    | —                          | OpenRAG base URL (required)                         |
 | `OPENRAG_API_TOKEN`  | —                          | API token (required, server-side only)              |
 | `OPENRAG_PARTITIONS` | _(empty = all)_            | Comma-separated allowlist for the listbox           |
 | `PORT`               | `8787`                     | Proxy port                                          |

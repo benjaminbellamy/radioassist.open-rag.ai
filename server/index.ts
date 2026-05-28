@@ -15,22 +15,26 @@ try {
   /* env provided by the environment */
 }
 
-const BASE = (process.env.OPENRAG_API_URL ?? 'https://demo.open-rag.ai').replace(/\/+$/, '')
+const BASE = (process.env.OPENRAG_API_URL ?? '').replace(/\/+$/, '')
 const TOKEN = process.env.OPENRAG_API_TOKEN ?? ''
 const PORT = Number(process.env.PORT ?? 8787)
 // Bind to loopback by default so only a local reverse proxy (Caddy) can reach
 // it. Set HOST=0.0.0.0 only if you deliberately want it exposed.
 const HOST = process.env.HOST ?? '127.0.0.1'
-const BASE_HOST = new URL(BASE).host
 const ALLOWLIST = (process.env.OPENRAG_PARTITIONS ?? '')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean)
 
-if (!TOKEN) {
-  console.error('Missing OPENRAG_API_TOKEN. Copy .env.example to .env and set it.')
+if (!BASE || !TOKEN) {
+  console.error(
+    'Missing required env var(s): OPENRAG_API_URL and/or OPENRAG_API_TOKEN. ' +
+      'Copy .env.example to .env and set them.',
+  )
   process.exit(1)
 }
+
+const BASE_HOST = new URL(BASE).host
 
 const authHeaders = { Authorization: `Bearer ${TOKEN}` }
 
