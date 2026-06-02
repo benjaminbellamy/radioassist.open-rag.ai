@@ -35,6 +35,33 @@ issues. In production the proxy binds to loopback and Caddy terminates HTTPS.
   run directly by Node's built-in type-stripping — no runtime transpiler.
 - For HTTPS in production: **Caddy**.
 
+### Installing Node.js + npm (Debian)
+
+Debian's own `nodejs` package is too old. Follow the official installer from
+<https://nodejs.org/en/download> (nvm method) — `npm` comes bundled with Node:
+
+```bash
+# Download and install nvm:
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
+
+# in lieu of restarting the shell
+\. "$HOME/.nvm/nvm.sh"
+
+# Download and install Node.js:
+nvm install 24
+
+# Verify the Node.js version:
+node -v # Should print "v24.16.0".
+
+# Verify npm version:
+npm -v # Should print "11.13.0".
+```
+
+> **Production note:** nvm installs Node under the invoking user's home. The
+> systemd unit below needs a stable absolute `node` path — run `which node`
+> as the service user and use that path in `ExecStart` (the unit assumes
+> `/usr/bin/node`; adjust it to whatever `which node` reports).
+
 ## Setup
 
 ```bash
@@ -59,9 +86,10 @@ Tested on Debian/Ubuntu; adapt paths and the package manager as needed. The app
 runs under a **dedicated, non-privileged system user** (no shell, not a sudoer),
 listens only on loopback, and is fronted by Caddy for automatic HTTPS.
 
-Install Node system-wide (e.g. from NodeSource), not via `nvm` — a system
-service needs a stable absolute `node` path. Confirm it with `which node`
-(below assumes `/usr/bin/node`).
+Install Node as shown in [Installing Node.js + npm](#installing-nodejs--npm-debian)
+above. A system service needs a stable absolute `node` path: confirm it with
+`which node` and set it in the unit's `ExecStart` (below assumes
+`/usr/bin/node`; an nvm install lives under the user's home instead).
 
 ### 1. Create the service user
 
