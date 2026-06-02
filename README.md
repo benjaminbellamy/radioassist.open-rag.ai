@@ -263,7 +263,23 @@ journalctl -u radioassist -f          # follow logs
 > If startup fails with a syscall/address-family error on an unusual kernel,
 > relax `SystemCallFilter`/`RestrictAddressFamilies` first to confirm the cause.
 
-### 7. Caddy — `/etc/caddy/Caddyfile`
+### 7. Caddy
+
+Debian's `caddy` package is often stale; install from Caddy's official apt repo
+(per <https://caddyserver.com/docs/install#debian-ubuntu-raspbian>), as `root`:
+
+```bash
+sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+  | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+  | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt-get update
+sudo apt-get install -y caddy
+```
+
+Installing the package also creates and enables a `caddy` systemd service that
+reads `/etc/caddy/Caddyfile`. Replace that file's contents with:
 
 ```caddy
 radioassist.open-rag.ai {
