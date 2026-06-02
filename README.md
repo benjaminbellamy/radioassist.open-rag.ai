@@ -65,8 +65,12 @@ service needs a stable absolute `node` path. Confirm it with `which node`
 
 ### 1. Create the service user
 
+The user's home goes in `/var/lib/radioassist` (standard for system services and
+needed by `npm` for its cache during deploy); the application itself lives in
+`/opt/radioassist.open-rag.ai`.
+
 ```bash
-sudo useradd --system --create-home --home-dir /opt/radioassist.open-rag.ai \
+sudo useradd --system --create-home --home-dir /var/lib/radioassist \
      --shell /usr/sbin/nologin radioassist
 ```
 
@@ -76,8 +80,8 @@ to any sudo/admin group.
 ### 2. Deploy the code (owned by the service user)
 
 ```bash
-sudo -u radioassist git clone <your-repo-url> /opt/radioassist.open-rag.ai
-# (or rsync your tree there, then:)
+sudo git clone https://github.com/linagora/radioassist.open-rag.ai.git \
+     /opt/radioassist.open-rag.ai
 sudo chown -R radioassist:radioassist /opt/radioassist.open-rag.ai
 sudo -u radioassist mkdir -p /opt/radioassist.open-rag.ai/data   # writable dir for prompts.json
 ```
