@@ -40,6 +40,15 @@ export default function App() {
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
+  // --- Typewriter smoothing ---------------------------------------------
+  // Upstream SSE deltas can arrive in big, uneven chunks (and a buffering
+  // reverse proxy makes it worse), so appending them directly looks jerky —
+  // paragraph by paragraph. Instead we queue incoming text and reveal it at a
+  // steady per-frame cadence so it always types out smoothly, letter by letter.
+  const pendingRef = useRef('')
+  const rafRef = useRef<number | null>(null)
+  const streamDoneRef = useRef(false)
+
   useEffect(() => {
     fetchPartitions()
       .then((list) => {
@@ -68,6 +77,32 @@ export default function App() {
     [],
   )
 
+  const drain = useCallback(() => {
+    const pending = pendingRef.current
+    if (pending.length === 0) {
+      if (streamDoneRef.current) {
+        rafRef.current = null
+        updateLast((m) => (m.streaming ? { ...m, streaming: false } : m))
+        return
+      }
+      rafRef.current = requestAnimationFrame(drain)
+      return
+    }
+    // Reveal a few chars per frame; speed up when the backlog is large so we
+    // never fall far behind, but still animate single characters near the end.
+    const n = Math.max(1, Math.ceil(pending.length / 10))
+    pendingRef.current = pending.slice(n)
+    updateLast((m) => ({ ...m, content: m.content + pending.slice(0, n) }))
+    rafRef.current = requestAnimationFrame(drain)
+  }, [updateLast])
+
+  const resetStream = useCallback(() => {
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+    rafRef.current = null
+    pendingRef.current = ''
+    streamDoneRef.current = true
+  }, [])
+
   const send = useCallback(
     async (text: string) => {
       if (!partition || busy) return
@@ -86,12 +121,19 @@ export default function App() {
       const controller = new AbortController()
       abortRef.current = controller
 
+      // Arm the typewriter: queue is empty, more is coming, frame loop runs.
+      pendingRef.current = ''
+      streamDoneRef.current = false
+      if (rafRef.current === null) rafRef.current = requestAnimationFrame(drain)
+
       try {
         await streamChat({
           partition,
           messages: apiMessages,
           signal: controller.signal,
-          onToken: (t) => updateLast((m) => ({ ...m, content: m.content + t })),
+          onToken: (t) => {
+            pendingRef.current += t
+          },
           onSources: (s) => {
             updateLast((m) => ({ ...m, sources: s }))
             // Surface the answer's first audio source in the player strip.
@@ -101,6 +143,8 @@ export default function App() {
         })
       } catch (err) {
         if (!controller.signal.aborted) {
+          // Drop any buffered text and show the error in its place.
+          pendingRef.current = ''
           updateLast((m) => ({
             ...m,
             content: m.content || `⚠️ ${String(err)}`,
@@ -108,15 +152,20 @@ export default function App() {
           }))
         }
       } finally {
-        updateLast((m) => ({ ...m, streaming: false }))
+        // Let the drain loop type out whatever is still queued, then it clears
+        // the `streaming` flag once the queue empties.
+        streamDoneRef.current = true
         setBusy(false)
         abortRef.current = null
       }
     },
-    [partition, busy, messages, updateLast],
+    [partition, busy, messages, updateLast, drain],
   )
 
-  const stop = useCallback(() => abortRef.current?.abort(), [])
+  const stop = useCallback(() => {
+    abortRef.current?.abort()
+    pendingRef.current = '' // halt the typewriter immediately on user stop
+  }, [])
 
   const openSource = useCallback((s: Source) => {
     if (isAudio(s)) setActiveAudio(s)
@@ -135,12 +184,15 @@ export default function App() {
 
   function clearPage() {
     abortRef.current?.abort()
+    resetStream()
     setMessages([])
     setActiveAudio(null)
     setActiveSource(null)
   }
 
   function changePartition(p: string) {
+    abortRef.current?.abort()
+    resetStream()
     setPartition(p)
     setMessages([])
     setActiveAudio(null)
