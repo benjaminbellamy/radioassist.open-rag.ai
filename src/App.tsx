@@ -88,9 +88,12 @@ export default function App() {
       rafRef.current = requestAnimationFrame(drain)
       return
     }
-    // Reveal a few chars per frame; speed up when the backlog is large so we
-    // never fall far behind, but still animate single characters near the end.
-    const n = Math.max(1, Math.ceil(pending.length / 10))
+    // Reveal a generous slice each frame so output tracks the model with
+    // minimal lag (~a few hundred chars/sec at 60fps), while large bursts are
+    // still spread over a couple of frames instead of dumping a whole
+    // paragraph at once. When the backlog is smaller than the floor we just
+    // reveal all of it, so we never fall behind the stream.
+    const n = Math.max(20, Math.ceil(pending.length / 3))
     pendingRef.current = pending.slice(n)
     updateLast((m) => ({ ...m, content: m.content + pending.slice(0, n) }))
     rafRef.current = requestAnimationFrame(drain)
