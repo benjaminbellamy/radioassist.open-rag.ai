@@ -57,26 +57,48 @@ node -v # Should print "v24.16.0".
 npm -v # Should print "11.13.0".
 ```
 
-> **Production note:** nvm installs Node under the invoking user's home. The
-> systemd unit below needs a stable absolute `node` path — run `which node`
-> as the service user and use that path in `ExecStart` (the unit assumes
-> `/usr/bin/node`; adjust it to whatever `which node` reports).
+> This installs Node under **your** home. On a production server you instead
+> install nvm + Node under the dedicated service user — see
+> [§2 of the production guide](#2-install-nodejs-as-the-service-user-nvm).
 
-## Setup
+## Setup (development)
+
+Run as **your normal user** (not `root`, not the production service user). Pick a
+working directory you own — e.g. `~/src` — and clone the repo into it:
 
 ```bash
-cp .env.example .env      # then set OPENRAG_API_TOKEN
+mkdir -p ~/src && cd ~/src
+git clone https://github.com/linagora/radioassist.open-rag.ai.git
+cd radioassist.open-rag.ai
+```
+
+Create your local config from the template and set the two required values:
+
+```bash
+cp .env.example .env
+# Edit .env and set:
+#   OPENRAG_API_URL=https://your-openrag-host.tld
+#   OPENRAG_API_TOKEN=<your token>
+nano .env                 # or your editor of choice
+```
+
+Install dependencies (run from the repo root, i.e. `~/src/radioassist.open-rag.ai`):
+
+```bash
 npm install
 ```
 
 ## Develop
 
+From the same repo root:
+
 ```bash
 npm run dev               # Vite (5173) + proxy (127.0.0.1:8787), Vite forwards /api
-npm run typecheck         # optional
+npm run typecheck         # optional, in a second terminal
 ```
 
-Open http://localhost:5173.
+Open <http://localhost:5173>. The dev server reads the `.env` you just created;
+the API token stays in the proxy and is never sent to the browser.
 
 ---
 
@@ -86,16 +108,16 @@ Tested on Debian/Ubuntu; adapt paths and the package manager as needed. The app
 runs under a **dedicated, non-privileged system user** (no shell, not a sudoer),
 listens only on loopback, and is fronted by Caddy for automatic HTTPS.
 
-Install Node as shown in [Installing Node.js + npm](#installing-nodejs--npm-debian)
-above. A system service needs a stable absolute `node` path: confirm it with
-`which node` and set it in the unit's `ExecStart` (below assumes
-`/usr/bin/node`; an nvm install lives under the user's home instead).
+Run every command below as a user with `sudo` (e.g. your own admin account).
+The service account `radioassist` owns the whole runtime — its own nvm, its own
+Node, the code, and the data dir. It has no shell and no sudo rights; you never
+log in as it, you act on its behalf with `sudo -u radioassist`.
 
 ### 1. Create the service user
 
-The user's home goes in `/var/lib/radioassist` (standard for system services and
-needed by `npm` for its cache during deploy); the application itself lives in
-`/opt/radioassist.open-rag.ai`.
+The user's home goes in `/var/lib/radioassist` (this is where its nvm/Node and
+npm cache live — outside `/home`, so the systemd `ProtectHome=true` below does
+not mask it); the application itself lives in `/opt/radioassist.open-rag.ai`.
 
 ```bash
 sudo useradd --system --create-home --home-dir /var/lib/radioassist \
@@ -105,7 +127,36 @@ sudo useradd --system --create-home --home-dir /var/lib/radioassist \
 `--system` + `nologin` = no interactive login, and the account is **not** added
 to any sudo/admin group.
 
-### 2. Deploy the code (owned by the service user)
+### 2. Install Node.js as the service user (nvm)
+
+Install nvm + Node 24 **into the service user's home**, per the official
+installer at <https://nodejs.org/en/download>. The account is `nologin`, so we
+invoke `bash` explicitly and set `HOME` — `sudo -u … -i` (a login shell) will
+not work.
+
+The nvm installer needs `curl` (and CA certs for HTTPS):
+
+```bash
+sudo apt-get update && sudo apt-get install -y curl ca-certificates
+```
+
+```bash
+sudo -u radioassist env HOME=/var/lib/radioassist bash -c '
+  export NVM_DIR="$HOME/.nvm"
+  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
+  . "$NVM_DIR/nvm.sh"
+  nvm install 24
+  nvm alias default 24
+  node -v            # v24.16.0
+  command -v node    # ← COPY THIS ABSOLUTE PATH into ExecStart (step 6)
+'
+```
+
+The last line prints something like
+`/var/lib/radioassist/.nvm/versions/node/v24.16.0/bin/node`. That exact path is
+what the systemd unit runs — note it down.
+
+### 3. Deploy the code (owned by the service user)
 
 ```bash
 sudo git clone https://github.com/linagora/radioassist.open-rag.ai.git \
@@ -114,16 +165,21 @@ sudo chown -R radioassist:radioassist /opt/radioassist.open-rag.ai
 sudo -u radioassist mkdir -p /opt/radioassist.open-rag.ai/data   # writable dir for prompts.json
 ```
 
-### 3. Install dependencies and build (as the service user)
+### 4. Install dependencies and build (as the service user)
+
+Because Node lives in the service user's nvm, source nvm before running `npm`
+(this is why a bare `sudo -u radioassist … npm …` gives `npm: command not found`):
 
 ```bash
-sudo -u radioassist bash -c 'cd /opt/radioassist.open-rag.ai && npm ci && npm run build'
+sudo -u radioassist env HOME=/var/lib/radioassist bash -c '
+  export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"
+  cd /opt/radioassist.open-rag.ai && npm ci && npm run build'
 ```
 
 `npm ci` needs a committed `package-lock.json` (commit it); use `npm install`
 otherwise. The build needs the dev dependencies (Vite) — that's expected.
 
-### 4. Create the secret `.env` (locked down)
+### 5. Create the secret `.env` (locked down)
 
 ```bash
 sudo -u radioassist tee /opt/radioassist.open-rag.ai/.env >/dev/null <<'EOF'
@@ -138,7 +194,10 @@ sudo chmod 600 /opt/radioassist.open-rag.ai/.env
 `chmod 600` + service-user ownership means only that user (and root) can read
 the token.
 
-### 5. systemd unit — `/etc/systemd/system/radioassist.service`
+### 6. systemd unit — `/etc/systemd/system/radioassist.service`
+
+Set `ExecStart` to the absolute `node` path you copied in step 2 (shown below
+with the typical value — change the version if `command -v node` differed).
 
 ```ini
 [Unit]
@@ -152,7 +211,7 @@ User=radioassist
 Group=radioassist
 WorkingDirectory=/opt/radioassist.open-rag.ai
 Environment=NODE_ENV=production
-ExecStart=/usr/bin/node server/index.ts
+ExecStart=/var/lib/radioassist/.nvm/versions/node/v24.16.0/bin/node server/index.ts
 Restart=on-failure
 RestartSec=5
 
@@ -187,9 +246,12 @@ WantedBy=multi-user.target
 ```
 
 `ProtectSystem=strict` mounts the whole filesystem read-only; the app can read
-its code and `.env` but only `data/` (via `ReadWritePaths`) is writable. The
-empty `CapabilityBoundingSet`/`AmbientCapabilities` drop all Linux capabilities
-(the proxy needs none — it binds a high port, not <1024).
+its code, its `.env`, and the nvm `node` under `/var/lib/radioassist`, but only
+`data/` (via `ReadWritePaths`) is writable. `ProtectHome=true` masks `/home`,
+`/root`, and `/run/user` only — it does **not** touch `/var/lib`, so the
+service user's nvm `node` stays reachable. The empty
+`CapabilityBoundingSet`/`AmbientCapabilities` drop all Linux capabilities (the
+proxy needs none — it binds a high port, not <1024).
 
 ```bash
 sudo systemctl daemon-reload
@@ -201,7 +263,7 @@ journalctl -u radioassist -f          # follow logs
 > If startup fails with a syscall/address-family error on an unusual kernel,
 > relax `SystemCallFilter`/`RestrictAddressFamilies` first to confirm the cause.
 
-### 6. Caddy — `/etc/caddy/Caddyfile`
+### 7. Caddy — `/etc/caddy/Caddyfile`
 
 ```caddy
 radioassist.open-rag.ai {
@@ -233,7 +295,7 @@ A/AAAA record at the server first, and open ports 80/443).
 > block embedding. If you ever serve it standalone, add clickjacking protection
 > via a `frame-ancestors` CSP directive scoped to the allowed embedders.
 
-### 7. Firewall
+### 8. Firewall
 
 ```bash
 sudo ufw allow 80,443/tcp
@@ -246,11 +308,15 @@ even without a firewall rule — Caddy is the only public entry point.
 ### Updating
 
 ```bash
-sudo -u radioassist bash -c 'cd /opt/radioassist.open-rag.ai && git pull && npm ci && npm run build'
+sudo -u radioassist env HOME=/var/lib/radioassist bash -c '
+  export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"
+  cd /opt/radioassist.open-rag.ai && git pull && npm ci && npm run build'
 sudo systemctl restart radioassist
 ```
 
-Run `npm audit` periodically and keep Node/Caddy patched.
+Run `npm audit` periodically and keep Node/Caddy patched. If you bump the Node
+major (`nvm install …` then `nvm alias default …`), the versioned path changes —
+update `ExecStart` in the unit and `systemctl daemon-reload` + `restart`.
 
 ---
 
